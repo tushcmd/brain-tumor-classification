@@ -42,6 +42,68 @@ def generate_explanation(img_path, model_prediction, confidence):
 
 @tf.function
 def generate_saliency_map(model, img_array, class_index, img_size):
+    # Convert input to tensor and create gradient tape context
+    img_tensor = tf.convert_to_tensor(img_array, dtype=tf.float32)
+    
+    with tf.GradientTape() as tape:
+        tape.watch(img_tensor)
+        try:
+            predictions = model(img_tensor, training=False)
+            target_class = predictions[:, class_index]
+        except Exception as e:
+            st.error(f"Error during prediction: {str(e)}")
+            return None
+
+    try:
+        # Calculate and process gradients
+        gradients = tape.gradient(target_class, img_tensor)
+        if gradients is None:
+            st.error("Failed to compute gradients")
+            return None
+            
+        gradients = tf.math.abs(gradients)
+        gradients = tf.reduce_max(gradients, axis=-1)
+        gradients = gradients.numpy().squeeze()
+
+        # Resize gradients to match original image size
+        gradients = cv2.resize(gradients, (img_size[1], img_size[0]))
+
+        # Create circular mask
+        center = (gradients.shape[1] // 2, gradients.shape[0] // 2)
+        radius = min(center[0], center[1]) - 10
+        y, x = np.ogrid[:gradients.shape[0], :gradients.shape[1]]
+        mask = (x - center[1])**2 + (y - center[0])**2 <= radius**2
+
+        # Apply mask and normalize
+        gradients = gradients * mask
+        brain_gradients = gradients[mask]
+        if brain_gradients.size > 0 and brain_gradients.max() > brain_gradients.min():
+            brain_gradients = (brain_gradients - brain_gradients.min()) / (brain_gradients.max() - brain_gradients.min())
+            gradients[mask] = brain_gradients
+
+        # Threshold and smooth
+        threshold = np.percentile(gradients[mask], 80) if mask.any() else 0
+        gradients[gradients < threshold] = 0
+        gradients = cv2.GaussianBlur(gradients, (11, 11), 0)
+
+        # Create heatmap
+        heatmap = cv2.applyColorMap(np.uint8(255 * gradients), cv2.COLORMAP_JET)
+        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+        heatmap = cv2.resize(heatmap, (img_size[1], img_size[0]))
+
+        # Overlay heatmap on original image
+        original_img = image.img_to_array(img_array[0] * 255).astype(np.uint8)
+        superimposed_img = heatmap * 0.7 + original_img * 0.3
+        superimposed_img = superimposed_img.astype(np.uint8)
+
+        return superimposed_img
+
+    except Exception as e:
+        st.error(f"Error generating saliency map: {str(e)}")
+        return None
+
+"""
+def generate_saliency_map(model, img_array, class_index, img_size):
     with tf.GradientTape() as tape:
         img_tensor = tf.convert_to_tensor(img_array)
         tape.watch(img_tensor)
@@ -102,67 +164,7 @@ def generate_saliency_map(model, img_array, class_index, img_size):
     return superimposed_img
 
 """
-def generate_saliency_map(model, img_array, class_index, img_size):
-    # Convert input to tensor and create gradient tape context
-    img_tensor = tf.convert_to_tensor(img_array, dtype=tf.float32)
-    
-    with tf.GradientTape() as tape:
-        tape.watch(img_tensor)
-        try:
-            predictions = model(img_tensor, training=False)
-            target_class = predictions[:, class_index]
-        except Exception as e:
-            st.error(f"Error during prediction: {str(e)}")
-            return None
 
-    try:
-        # Calculate and process gradients
-        gradients = tape.gradient(target_class, img_tensor)
-        if gradients is None:
-            st.error("Failed to compute gradients")
-            return None
-            
-        gradients = tf.math.abs(gradients)
-        gradients = tf.reduce_max(gradients, axis=-1)
-        gradients = gradients.numpy().squeeze()
-
-        # Resize gradients to match original image size
-        gradients = cv2.resize(gradients, (img_size[1], img_size[0]))
-
-        # Create circular mask
-        center = (gradients.shape[1] // 2, gradients.shape[0] // 2)
-        radius = min(center[0], center[1]) - 10
-        y, x = np.ogrid[:gradients.shape[0], :gradients.shape[1]]
-        mask = (x - center[1])**2 + (y - center[0])**2 <= radius**2
-
-        # Apply mask and normalize
-        gradients = gradients * mask
-        brain_gradients = gradients[mask]
-        if brain_gradients.size > 0 and brain_gradients.max() > brain_gradients.min():
-            brain_gradients = (brain_gradients - brain_gradients.min()) / (brain_gradients.max() - brain_gradients.min())
-            gradients[mask] = brain_gradients
-
-        # Threshold and smooth
-        threshold = np.percentile(gradients[mask], 80) if mask.any() else 0
-        gradients[gradients < threshold] = 0
-        gradients = cv2.GaussianBlur(gradients, (11, 11), 0)
-
-        # Create heatmap
-        heatmap = cv2.applyColorMap(np.uint8(255 * gradients), cv2.COLORMAP_JET)
-        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-        heatmap = cv2.resize(heatmap, (img_size[1], img_size[0]))
-
-        # Overlay heatmap on original image
-        original_img = image.img_to_array(img_array[0] * 255).astype(np.uint8)
-        superimposed_img = heatmap * 0.7 + original_img * 0.3
-        superimposed_img = superimposed_img.astype(np.uint8)
-
-        return superimposed_img
-
-    except Exception as e:
-        st.error(f"Error generating saliency map: {str(e)}")
-        return None
-"""
 def load_xception_model(model_path):
     try:
         img_shape = (299, 299, 3)

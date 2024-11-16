@@ -11,7 +11,6 @@ from tensorflow.keras.layers import Dense, Dropout, Flatten
 from tensorflow.keras.optimizers import Adamax
 from tensorflow.keras.metrics import Precision, Recall
 import google.generativeai as genai
-from google.colab import userdata
 import PIL.Image
 import os
 from dotenv import load_dotenv
@@ -22,6 +21,9 @@ load_dotenv()
 # output_dir = '/content/saliency_maps'
 # if not os.path.exists(output_dir):
 #     os.makedirs(output_dir)
+
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
 output_dir = 'saliency_maps'
 os.makedirs(output_dir, exist_ok=True)
 
@@ -49,6 +51,7 @@ def generate_explanation(img_path, model_prediction, confidence):
   print(response.text)
 
   return response.text
+
 
 def generate_saliency_map(model, img_array, class_index, img_size):
   with tf.GradientTape() as tape:
@@ -87,7 +90,7 @@ def generate_saliency_map(model, img_array, class_index, img_size):
 
 
   # Apply a higher threshold
-  threshold = np.percentile[mask]
+  threshold = np.percentile(gradients[mask], 80)
   gradients[gradients < threshold] = 0
 
   # Apply more aggressive smoothing
@@ -159,10 +162,10 @@ if uploaded_file is not None:
     )
 
     if selected_model == 'Xception':
-        model = load_xception_model('/content/xception_model.weights.h5')
+        model = load_xception_model('xception_model.weights.h5')
         img_size = [299, 299]
     else:
-        model = load_model('/content/cnn_model.h5')
+        model = load_model('cnn_model.h5')
         img_size = [224, 224]
 
 
@@ -193,9 +196,9 @@ if uploaded_file is not None:
     # st.image(saliency_map, caption='Saliency Map', use_column_width=True)
     col1, col2 = st.columns(2)
     with col1:
-        st.image(uploaded_file, caption='Uploaded Image', use_column_width=True)
+        st.image(uploaded_file, caption='Uploaded Image', use_container_width=True)
     with col2:
-        st.image(saliency_map, caption='Saliency Map', use_column_width=True)
+        st.image(saliency_map, caption='Saliency Map', use_container_width=True)
 
     # Display the result
     st.write("## Classification Results")
